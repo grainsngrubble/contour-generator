@@ -91,3 +91,8 @@ data/tiles.mbtiles
 Example preview of mountainous area with `20 m`, `50 m`, and `100 m` elevation contour lines and labels.
 
 ![Preview](preview/preview.png)
+
+### Performance
+
+- Creating a complete .MBTiles with zoom level 10-14 of Gotland Island elapsed for about 3 minutes on a 12 core WSL-machine @ 5.4 GHz
+- Creating a complete .MBTiles with zoom level 10-14 of Europe with margin elapsed for about 14 hours on a 12 core WSL-machine @ 5.4 GHz
