@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import math
 import os
 import re
 import shlex
@@ -14,17 +15,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
-BBOX_W = -45
-BBOX_E = 56
-BBOX_S = 22
-BBOX_N = 82
-TOTAL_COLS = BBOX_E - BBOX_W
-TOTAL_ROWS = BBOX_N - BBOX_S
-BAD_EXPECTED_FALLBACK = {"N60E007", "N64E028"}
-WATCH_AREAS = {
-    "P32": {"lon_min": 6, "lon_max": 11, "lat_min": 60, "lat_max": 63},
-    "Q35": {"lon_min": 24, "lon_max": 29, "lat_min": 64, "lat_max": 67},
-}
 DEFAULT_REPO_ROOT = str(Path(__file__).resolve().parent)
 PROGRESS_RE = re.compile(r"^\[(?P<stamp>[^\]]+)\].*\bC:\s+.*\bW:\s+.*\bR:\s+")
 CONTOUR_RE = re.compile(
@@ -101,6 +91,17 @@ class TrackedImage:
     tag: str
     before_id: Optional[str]
     after_id: str
+
+
+@dataclass(frozen=True)
+class ContourExtent:
+    lon_min: int
+    lon_max: int
+    lat_min: int
+    lat_max: int
+    total_cols: int
+    total_rows: int
+    total_tiles: int
 
 
 class PipelineDashboard:
@@ -191,6 +192,7 @@ class ContourDetail(GenericDetail):
     def __init__(self, repo_root: Path):
         self.repo_root = repo_root
         self.project_name = repo_root.name
+        self.extent = read_contour_extent(repo_root / "data" / "bbox.poly")
         self.events = []
         self.tiles = {}
         self.scan_events = []
@@ -277,7 +279,7 @@ class ContourDetail(GenericDetail):
         latest_progress = self.latest or self.latest_scan
         processed_tiles = len(self.tiles)
         scanned_tiles = len(self.scan_tiles)
-        total_tiles = TOTAL_COLS * TOTAL_ROWS
+        total_tiles = self.extent.total_tiles
         progress = processed_tiles / total_tiles if total_tiles else 0.0
         elapsed = (latest_progress["ts"] - self.started).total_seconds() if self.started and latest_progress else None
         overall_speed = processed_tiles / (elapsed / 3600.0) if elapsed and elapsed > 0 else None
@@ -319,8 +321,8 @@ class ContourDetail(GenericDetail):
                 "",
                 f"Tile progress:      {processed_tiles} / {total_tiles}",
                 f"Scan coverage:      {scanned_tiles} / {total_tiles}",
-                f"Columns computed:   {computed_lons} / {TOTAL_COLS}",
-                f"Columns scanned:    {scanned_lons} / {TOTAL_COLS}",
+                f"Columns computed:   {computed_lons} / {self.extent.total_cols}",
+                f"Columns scanned:    {scanned_lons} / {self.extent.total_cols}",
                 f"Elapsed contour:    {fmt_duration(elapsed)}",
                 f"Speed overall:      {overall_speed:.2f} tiles/hour" if overall_speed else "Speed overall:      n/a",
                 f"Speed last 30 min:  {speed_30:.2f} tiles/hour" if speed_30 else "Speed last 30 min:  n/a",
@@ -332,12 +334,8 @@ class ContourDetail(GenericDetail):
                 f"Computed HGT tiles: {len(self.tiles)}",
                 f"VIEW1 tiles:        {views.get('VIEW1', 0)}",
                 f"VIEW3 tiles:        {views.get('VIEW3', 0)}",
-                "",
-                "Repair watch:",
             ]
         )
-        for name, area in WATCH_AREAS.items():
-            lines.append(f"  {area_status(name, area, self.tiles)}")
         if self.last_non_hgt_lines:
             lines.extend(["", "Recent non-HGT log lines:"])
             lines.extend(f"  {line}" for line in self.last_non_hgt_lines[-5:])
@@ -358,7 +356,6 @@ class ContourDetail(GenericDetail):
             "tile": match.group("tile"),
             "points_x": int(match.group("x")),
             "points_y": int(match.group("y")),
-            "pos": tile_position(lon, lat),
         }
 
     def _parse_scan(self, line: str):
@@ -374,7 +371,6 @@ class ContourDetail(GenericDetail):
             "lat": lat,
             "tile": tile,
             "message": match.group("message"),
-            "pos": tile_position(lon, lat),
         }
 
 
@@ -1139,7 +1135,7 @@ def verify_contour_outputs(repo_root: Path):
         raise StageError("no contour PBF was generated in data/")
 
 
-def read_bbox_poly_bounds(poly_path: Path) -> str:
+def read_poly_coords(poly_path: Path):
     coords = []
     for raw_line in poly_path.read_text(encoding="utf-8", errors="replace").splitlines():
         stripped = raw_line.strip()
@@ -1156,6 +1152,34 @@ def read_bbox_poly_bounds(poly_path: Path) -> str:
         coords.append((lon, lat))
     if not coords:
         raise StageError(f"could not parse any polygon coordinates from {poly_path}")
+    return coords
+
+
+def read_contour_extent(poly_path: Path) -> ContourExtent:
+    coords = read_poly_coords(poly_path)
+    lons = [lon for lon, _ in coords]
+    lats = [lat for _, lat in coords]
+    lon_min = math.floor(min(lons))
+    lon_max = math.ceil(max(lons)) - 1
+    lat_min = math.floor(min(lats))
+    lat_max = math.ceil(max(lats)) - 1
+    if lon_max < lon_min or lat_max < lat_min:
+        raise StageError(f"invalid contour tile extent derived from {poly_path}")
+    total_cols = (lon_max - lon_min) + 1
+    total_rows = (lat_max - lat_min) + 1
+    return ContourExtent(
+        lon_min=lon_min,
+        lon_max=lon_max,
+        lat_min=lat_min,
+        lat_max=lat_max,
+        total_cols=total_cols,
+        total_rows=total_rows,
+        total_tiles=total_cols * total_rows,
+    )
+
+
+def read_bbox_poly_bounds(poly_path: Path) -> str:
+    coords = read_poly_coords(poly_path)
     lons = [lon for lon, _ in coords]
     lats = [lat for _, lat in coords]
     return f"{min(lons):.6f},{min(lats):.6f},{max(lons):.6f},{max(lats):.6f}"
@@ -1214,9 +1238,6 @@ def tile_to_lon_lat(tile: str):
     return lon, lat
 
 
-def tile_position(lon, lat):
-    return (lon - BBOX_W) + max(0.0, min(1.0, ((lat - BBOX_S) + 1) / TOTAL_ROWS))
-
 
 def speed_from_events(events, window_minutes):
     if len(events) < 2:
@@ -1234,33 +1255,6 @@ def speed_from_events(events, window_minutes):
         return None
     return dp / (dt / 3600.0)
 
-
-def area_status(name, area, tiles):
-    expected = []
-    for lat in range(area["lat_min"], area["lat_max"] + 1):
-        for lon in range(area["lon_min"], area["lon_max"] + 1):
-            ns = f"N{lat:02d}" if lat >= 0 else f"S{abs(lat):02d}"
-            ew = f"E{lon:03d}" if lon >= 0 else f"W{abs(lon):03d}"
-            expected.append((lon, lat, ns + ew))
-    seen = []
-    v1 = 0
-    v3 = 0
-    bad_seen = []
-    for lon, lat, tile in expected:
-        event = tiles.get((lon, lat))
-        if not event:
-            continue
-        seen.append(tile)
-        if event["view"] == "VIEW1":
-            v1 += 1
-        elif event["view"] == "VIEW3":
-            v3 += 1
-        if tile in BAD_EXPECTED_FALLBACK:
-            bad_seen.append(f"{tile}:{event['view']}")
-    if not seen:
-        return f"{name}: not reached"
-    fallback = ", ".join(bad_seen) if bad_seen else "-"
-    return f"{name}: {len(seen)}/{len(expected)} seen | VIEW1 {v1} | VIEW3 {v3} | bad/fallback {fallback}"
 
 
 def scan_data_dir(data_dir: Path):
