@@ -1,0 +1,16 @@
+tileset:
+  layers:
+    - layers/contour/contour.yaml
+  name: OpenContourMapTiles
+  version: 0.0.1
+  id: opencontourmaptiles
+  description: "A tileset showing contour elevation lines. http://www.xdappfactory.com"
+  attribution: '<a href="http://www.openmaptiles.org/" target="_blank">&copy; OpenMapTiles</a> <a href="http://www.openstreetmap.org/about/" target="_blank">&copy; OpenStreetMap contributors</a>'
+  center: [-12.2168, 28.6135, 4]
+  maxzoom: 14
+  minzoom: 0
+  pixel_scale: 256
+  defaults:
+    srs: +proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0.0 +k=1.0 +units=m +nadgrids=@null +wktext +no_defs +over
+    datasource:
+      srid: 900913

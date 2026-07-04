@@ -1,0 +1,12 @@
+generalized_tables: {}
+tables:
+  contour:
+    fields:
+    - {name: geometry, type: geometry}
+    - {key: ele, name: ele, type: integer}
+    mapping:
+      contour: [elevation]
+    type: linestring
+tags:
+  include: [int_name, loc_name, name, wikidata, wikipedia]
+

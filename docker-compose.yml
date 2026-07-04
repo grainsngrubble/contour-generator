@@ -1,0 +1,98 @@
+volumes:
+  pgdata:
+  cache:
+services:
+  generate-osm-contours:
+    image: "contourgenerator/generate-osm-contours:flat404"
+    build:
+      context: ./contours/image
+    environment:
+      PHYGHTMAP_JOBS: "${PHYGHTMAP_JOBS:-1}"
+      PHYGHTMAP_HGTDIR: "${PHYGHTMAP_HGTDIR:-/import/hgt}"
+      PHYGHTMAP_DOWNLOAD_ONLY: "${PHYGHTMAP_DOWNLOAD_ONLY:-0}"
+      PHYGHTMAP_SOURCE: "${PHYGHTMAP_SOURCE:-view1,view3,srtm3}"
+      PHYGHTMAP_EXTRA_ARGS: "${PHYGHTMAP_EXTRA_ARGS:-}"
+      EARTHEXPLORER_USER: "${EARTHEXPLORER_USER:-}"
+      EARTHEXPLORER_PASSWORD: "${EARTHEXPLORER_PASSWORD:-}"
+    volumes:
+     - ./data:/import
+  postgres:
+    image: "openmaptiles/postgis:2.9"
+    mem_limit: "${POSTGRES_MEM_LIMIT:-20g}"
+    memswap_limit: "${POSTGRES_MEMSWAP_LIMIT:-20g}"
+    volumes:
+    - pgdata:/var/lib/postgresql/data
+    networks:
+    - postgres_conn
+    ports:
+     - "5432"
+    env_file: .env
+  import-osm:
+    image: "openmaptiles/import-osm:0.5"
+    env_file: .env
+    environment:
+      DIFF_MODE: ${DIFF_MODE}
+    networks:
+    - postgres_conn
+    volumes:
+     - ./data:/import
+     - ./build:/mapping
+     - cache:/cache
+  import-sql:
+    image: "openmaptiles/import-sql:0.7"
+    env_file: .env
+    networks:
+    - postgres_conn
+    volumes:
+     - ./build:/sql
+  openmaptiles-tools:
+    image: "openmaptiles/openmaptiles-tools:0.8"
+    env_file: .env
+    networks:
+    - postgres_conn
+    volumes:
+     - .:/tileset
+     - ./build:/sql
+  postserve:
+    image: "contourgenerator/postserve-streaming:local"
+    build:
+      context: ./services/postserve
+    env_file: .env
+    networks:
+     - postgres_conn
+    ports:
+    - "8090:8080"
+    volumes:
+     - ./build/openmaptiles.tm2source:/mapping
+    mem_limit: "${POSTSERVE_MEM_LIMIT:-128m}"
+    memswap_limit: "${POSTSERVE_MEMSWAP_LIMIT:-128m}"
+    environment:
+      POSTSERVE_APP_NAME: "postserve_streaming"
+      POSTSERVE_DEFAULT_TIMEOUT_MS: "29000"
+      POSTSERVE_MIN_TIMEOUT_MS: "1000"
+      POSTSERVE_MAX_TIMEOUT_MS: "180000"
+      POSTSERVE_IDLE_TIMEOUT_MS: "30000"
+      POSTSERVE_LOCK_TIMEOUT_MS: "5000"
+
+  postserve-worker:
+    image: "contourgenerator/postserve-streaming:local"
+    build:
+      context: ./services/postserve
+    env_file: .env
+    networks:
+      - postgres_conn
+    volumes:
+      - ./build/openmaptiles.tm2source:/mapping
+    mem_limit: "${POSTSERVE_WORKER_MEM_LIMIT:-128m}"
+    memswap_limit: "${POSTSERVE_WORKER_MEMSWAP_LIMIT:-128m}"
+    environment:
+      POSTSERVE_APP_NAME: "postserve_streaming_worker"
+      POSTSERVE_DEFAULT_TIMEOUT_MS: "29000"
+      POSTSERVE_MIN_TIMEOUT_MS: "1000"
+      POSTSERVE_MAX_TIMEOUT_MS: "180000"
+      POSTSERVE_IDLE_TIMEOUT_MS: "30000"
+      POSTSERVE_LOCK_TIMEOUT_MS: "5000"
+
+networks:
+  postgres_conn:
+    driver: bridge
