@@ -11,15 +11,15 @@ The CLI tool is built on top of the OpenMapTiles toolchain and focuses on making
 
 ### Requirements
 
-To generate contour tiles from `VIEW1`,`VIEW3` you need:
+To generate contour tiles from `VIEW1`,`VIEW3` DEM you need:
 
 - Docker
 - Docker Compose
 - Python 3
 
-To generate contour tiles including `SRTM3` you need:
+To generate contour tiles including `SRTM3` DEM you need:
 
-- USGS account to download DEM data
+- USGS account to download Srtm3 DEM data
 
 Register for free at [ers.cr.usgs.gov/register](https://ers.cr.usgs.gov/register/).
 
